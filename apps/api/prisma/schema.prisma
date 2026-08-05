@@ -1,0 +1,160 @@
+// CommentIQ MVP schema.
+// Postgres (Neon) datasource — see apps/api/.env.example for the
+// DATABASE_URL format Neon gives you. Was SQLite during early local
+// development; Postgres is required once the API is deployed anywhere with
+// an ephemeral filesystem (Railway/Render/Vercel all wipe local files on
+// every redeploy), and it's also the prerequisite for the pgvector swap
+// noted in ai/embeddings.ts.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+model User {
+  id           String   @id @default(uuid())
+  email        String   @unique
+  passwordHash String
+  name         String?
+  plan         String   @default("free") // free | pro | business
+  createdAt    DateTime @default(now())
+
+  projects     Project[]
+  chatSessions ChatSession[]
+}
+
+model Project {
+  id          String   @id @default(uuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id])
+  name        String
+  description String?
+  status      String   @default("pending") // pending | processing | ready | failed
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  sources      Source[]
+  topics       Topic[]
+  keywords     Keyword[]
+  reports      Report[]
+  chatSessions ChatSession[]
+}
+
+model Source {
+  id                  String   @id @default(uuid())
+  projectId           String
+  project             Project  @relation(fields: [projectId], references: [id])
+  platform            String // youtube | csv_upload
+  sourceUrl           String?
+  filePath            String?
+  externalId          String?
+  title               String?
+  fetchedCommentCount Int      @default(0)
+  fetchStatus         String   @default("pending") // pending | running | done | failed
+  fetchError          String?
+  createdAt           DateTime @default(now())
+
+  comments Comment[]
+}
+
+model Comment {
+  id                   String    @id @default(uuid())
+  sourceId             String
+  source               Source    @relation(fields: [sourceId], references: [id])
+  externalCommentId    String?
+  username             String
+  authorIsVerified     Boolean   @default(false)
+  textOriginal         String
+  textTranslated       String?
+  languageCode         String?
+  likeCount            Int       @default(0)
+  replyCount           Int       @default(0)
+  postedAt             DateTime?
+  isDuplicate          Boolean   @default(false)
+  duplicateOfCommentId String?
+  createdAt            DateTime  @default(now())
+
+  analysis      CommentAnalysis?
+  commentTopics CommentTopic[]
+}
+
+model CommentAnalysis {
+  commentId            String    @id
+  comment              Comment   @relation(fields: [commentId], references: [id])
+  sentimentLabel       String? // positive | neutral | negative
+  sentimentConfidence  Float?
+  sentimentScore       Float?
+  emotions             String? // JSON blob: { joy: 0.8, anger: 0.1, ... }
+  toxicityFlags        String? // JSON blob: { spam: bool, hate_speech: bool, ... }
+  toxicityConfidence   String? // JSON blob
+  intent               String?
+  embedding            String? // JSON array, see ai/embeddings.ts
+  moderationSuggestion String?
+  analyzedAt           DateTime?
+}
+
+model Topic {
+  id           String   @id @default(uuid())
+  projectId    String
+  project      Project  @relation(fields: [projectId], references: [id])
+  name         String
+  description  String?
+  commentCount Int      @default(0)
+  createdAt    DateTime @default(now())
+
+  commentTopics CommentTopic[]
+}
+
+model CommentTopic {
+  commentId      String
+  comment        Comment @relation(fields: [commentId], references: [id])
+  topicId        String
+  topic          Topic   @relation(fields: [topicId], references: [id])
+  relevanceScore Float   @default(1)
+
+  @@id([commentId, topicId])
+}
+
+model Keyword {
+  id        String  @id @default(uuid())
+  projectId String
+  project   Project @relation(fields: [projectId], references: [id])
+  term      String
+  type      String // keyword | hashtag | person | organization | location | product | brand
+  frequency Int     @default(1)
+}
+
+model Report {
+  id          String   @id @default(uuid())
+  projectId   String
+  project     Project  @relation(fields: [projectId], references: [id])
+  format      String // csv | json | pdf
+  filePath    String
+  generatedAt DateTime @default(now())
+}
+
+model ChatSession {
+  id        String   @id @default(uuid())
+  projectId String
+  project   Project  @relation(fields: [projectId], references: [id])
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+  createdAt DateTime @default(now())
+
+  messages ChatMessage[]
+}
+
+model ChatMessage {
+  id              String      @id @default(uuid())
+  sessionId       String
+  session         ChatSession @relation(fields: [sessionId], references: [id])
+  role            String // user | assistant
+  content         String
+  citedCommentIds String? // JSON array of comment IDs
+  createdAt       DateTime    @default(now())
+}
